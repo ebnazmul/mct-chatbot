@@ -149,7 +149,7 @@ function App() {
           </div>
         </div>
       </div>
-      <footer className="w-full flex justify-center bg-sky-300 text-gray-800 py-3 italic">
+      <footer className="w-full flex justify-center bg-sky-300 text-gray-800 py-2 text-sm">
         <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-4">
           <p>Project by</p>
           <ul className="flex flex-wrap justify-center gap-2 sm:gap-4">

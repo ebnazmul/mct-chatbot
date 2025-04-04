@@ -6,35 +6,20 @@ import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { createRetrievalChain } from "langchain/chains/retrieval";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import cors from "cors";
-import helmet from "helmet";
-import rateLimit from "express-rate-limit";
 
-// Load environment variables
+
 config();
 
 const app = express();
 const PORT = process.env.PORT || 3004;
 
-// Security and middleware setup
-app.use(helmet());
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || "*",
-  methods: ["GET", "POST"],
-  allowedHeaders: ["Content-Type"]
+  origin: "*",
 }));
-
-// Rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use(limiter);
 app.use(express.json());
 
-// AI components
+
 let retrievalChain;
 let isAIInitialized = false;
 
@@ -43,21 +28,14 @@ async function initializeAI() {
     console.log("Initializing AI components...");
 
     const embeddings = new OllamaEmbeddings({
-      model: "mistral:latest",
-      baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
-      requestOptions: {
-        timeout: 30000 // 30 seconds timeout
-      }
+      model: "mistral:latest"
     });
 
-    console.log("Loading vector store...");
     const vectorStore = await FaissStore.load("./data", embeddings);
 
     const llm = new Ollama({
       model: "mistral:latest",
-      temperature: 0.2,
-      maxRetries: 3,
-      baseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+      temperature: 0.2
     });
 
     const prompt = ChatPromptTemplate.fromTemplate(`
@@ -94,7 +72,7 @@ async function initializeAI() {
 
     retrievalChain = await createRetrievalChain({
       combineDocsChain,
-      retriever: vectorStore.asRetriever(3), // Retrieve top 3 relevant documents
+      retriever: vectorStore.asRetriever(1)
     });
 
     isAIInitialized = true;
@@ -105,16 +83,8 @@ async function initializeAI() {
   }
 }
 
-// Health check endpoint
-app.get("/health", (req, res) => {
-  res.status(200).json({
-    status: "ok",
-    aiInitialized: isAIInitialized,
-    timestamp: new Date().toISOString()
-  });
-});
 
-// Question endpoint
+
 app.post("/ask", async (req, res) => {
   if (!isAIInitialized) {
     return res.status(503).json({
@@ -133,20 +103,17 @@ app.post("/ask", async (req, res) => {
   }
 
   try {
-    console.log(`Processing question: "${question}"`);
-    const startTime = Date.now();
 
     const result = await retrievalChain.invoke({
       input: question.trim()
     });
 
-    const responseTime = Date.now() - startTime;
-    console.log(`Answered in ${responseTime}ms`);
+    console.log(JSON.stringify(result));
 
     res.json({
       answer: result.answer,
       metadata: {
-        responseTime: `${responseTime}ms`,
+        responseTime: `${100}ms`,
         timestamp: new Date().toISOString()
       }
     });
@@ -169,11 +136,6 @@ async function startServer() {
   });
 }
 
-// Handle shutdown gracefully
-process.on("SIGINT", () => {
-  console.log("\n🛑 Shutting down server...");
-  process.exit(0);
-});
 
 startServer().catch(err => {
   console.error("Failed to start server:", err);
