@@ -95,12 +95,15 @@ function App() {
             </div>
           ) : (
             <div className="text-center mb-8">
+              <motion.div className="flex justify-center">
+              <img className="h-48" src="./mct-ai.png" alt="" />
+              </motion.div>
               <motion.h1 
                 initial={{ opacity: 0, y: -20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="text-4xl mb-2 font-bold text-gray-800"
               >
-                Hi, I'm ASK-MCT 👋
+                Hi, I'm MCT-Chatbot 👋
               </motion.h1>
               <motion.p
                 initial={{ opacity: 0 }}
