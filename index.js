@@ -6,69 +6,52 @@ import { createStuffDocumentsChain } from "langchain/chains/combine_documents";
 import { createRetrievalChain } from "langchain/chains/retrieval";
 import { ChatPromptTemplate } from "@langchain/core/prompts";
 import cors from "cors";
-
-
 config();
 
 const app = express();
 const PORT = process.env.PORT || 3004;
-
-
-app.use(cors({
-  origin: "*",
-}));
+app.use(cors({ origin: ["https://mct-chatbot.vercel.app"] })); 
 app.use(express.json());
 
-
 let retrievalChain;
-let isAIInitialized = false;
 
 async function initializeAI() {
   try {
     console.log("Initializing AI components...");
-
+    
     const embeddings = new OllamaEmbeddings({
       model: "mistral:latest"
     });
+    const vectorStore = await FaissStore.load("./data/processed", embeddings);
+    const llm = new Ollama({ model: "mistral:latest", temperature: 0.5 });
 
-    const vectorStore = await FaissStore.load("./data", embeddings);
+    // Define the prompt for the assistant
+    const prompt = ChatPromptTemplate.fromTemplate(` 
+      **Your Role**: Official AI for Daffodil International University's Multimedia & Creative Technology (MCT) program.
+      
+      ## INSTRUCTIONS:
+      1. GREETINGS:
+         - If input contains: hi/hello/hey/good [morning/afternoon]
+         - Reply ONLY: "Hello! How can I help with MCT today?"
+      
+      2. MCT QUESTIONS (Faculty/Courses/Admissions):
+         - Dont make too long answare strait to the point.
+      
+      3. OFF-TOPIC:
+         - Reply: "I only handle MCT queries. Ask about admissions, courses, or careers."
 
-    const llm = new Ollama({
-      model: "mistral:latest",
-      temperature: 0.1
-    });
+      ## RESPONSE Example:
+      - What is the amission helpline number?: "+8809617901212"
+      
+      ## CONTEXT:
+      {context}
+      
+      ## QUESTION:
+      {input}
+        
+      
+      **Answer:**`);
 
-    const prompt = ChatPromptTemplate.fromTemplate(`
-      You are the official MCT Department assistant at Daffodil International University.  
-      
-      **Strict Rules:**  
-      1. **Greetings (e.g., "hi", "hey"):**  
-         - Reply with *only*: "Hello! How can I help with MCT today?"  
-         - Never add extra details.  
-      
-      2. **MCT Questions:**  
-         - Answer **concisely** (1-2 sentences max) using ONLY the context.  
-         - If answer isn’t in context, say:  
-           "I don’t have that info, but the MCT department is updating our knowledge base."  
-         - Never mention "context".  
-      
-      3. **Non-MCT Queries:**  
-         - Reply: "I specialize in MCT-related questions. How can I assist you with the program?"  
-      
-      **Examples:**  
-      - Input: "Hey" → "Hello! How can I help with MCT today?"  
-      - Input: "Admission requirements?" → "Minimum SSC GPA 2.5 and HSC GPA 2.0. Pass the admission test."  
-      - Input: "What’s the weather?" → "I specialize in MCT-related questions. How can I assist you?"  
-      
-      **Context:**  
-      {context}  
-      
-      **Question:**  
-      {input}  
-      
-      **Answer (strictly follow these rules):**`);
-
-    console.log("Creating document chain...");
     const combineDocsChain = await createStuffDocumentsChain({
       llm,
       prompt,
@@ -76,72 +59,48 @@ async function initializeAI() {
 
     retrievalChain = await createRetrievalChain({
       combineDocsChain,
-      retriever: vectorStore.asRetriever(1)
+      retriever: vectorStore.asRetriever()
     });
 
-    isAIInitialized = true;
     console.log("✅ AI initialization complete!");
   } catch (error) {
-    console.error("❌ Error initializing AI:", error);
-    process.exit(1); // Exit if initialization fails
+    console.error("Error during AI initialization:", error);
   }
 }
 
-
-
 app.post("/ask", async (req, res) => {
-  if (!isAIInitialized) {
-    return res.status(503).json({
-      error: "Service unavailable",
-      message: "AI components are still initializing"
+  if (!retrievalChain) {
+    return res.status(500).json({
+      error: "AI components are not initialized. Please try again later."
     });
   }
 
   const { question } = req.body;
-
-  if (!question || typeof question !== "string") {
-    return res.status(400).json({
-      error: "Invalid request",
-      message: "Question must be a non-empty string"
-    });
-  }
+  const startTime = Date.now();
 
   try {
+    const result = await retrievalChain.invoke({ input: question.trim() });
+    const responseTime = Date.now() - startTime;
 
-    const result = await retrievalChain.invoke({
-      input: question.trim()
-    });
+    console.log(JSON.stringify(result), responseTime);
 
-    console.log(JSON.stringify(result));
-
-    res.json({
+    res.status(200).json({
       answer: result.answer,
       metadata: {
-        responseTime: `${100}ms`,
+        responseTime: `${responseTime}ms`,
         timestamp: new Date().toISOString()
       }
     });
   } catch (error) {
-    console.error("Error processing question:", error);
+    console.log("Error processing question:", error);
+
     res.status(500).json({
-      error: "Processing error",
-      message: "An error occurred while processing your question"
+      error: "Failed to process the request. Please check the server logs."
     });
   }
 });
 
-// Initialize and start server
-async function startServer() {
-  await initializeAI();
-
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log(`🔌 Ollama endpoint: ${process.env.OLLAMA_BASE_URL || "http://localhost:11434"}`);
-  });
-}
-
-
-startServer().catch(err => {
-  console.error("Failed to start server:", err);
-  process.exit(1);
+app.listen(PORT, () => {
+  initializeAI();
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
